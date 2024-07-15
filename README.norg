@@ -1,0 +1,428 @@
+@document.meta
+title: Neorg Module Tutorial
+description: These things are complicated
+tangle: {
+  languages: {
+    lua: ./lua/neorg/modules/external/my-module/module.lua
+  }
+}
+authors: benlubas
+created: 2024-07-15T14:29:10-0500
+updated: 2024-07-15T22:20:31-0500
+version: 1.1.1
+@end
+
+* Neorg Module Tutorial
+
+  This document will go over the [Neorg]{https://github.com/nvim-neorg/neorg} module system, and is intended to be read in
+  Neovim with [Neorg] and conceal{^ 1} enabled.
+
+** Internal vs External Modules
+   Neorg makes a distinction between *internal* and *external* modules.
+   - *Internal* modules are located in the core of neorg while
+   - *External* modules are located in another plugin/folder/repository
+   -- External modules can still be loaded like a normal [Neorg] module, and still
+      have access to all of [Neorg]'s core modules
+
+   There is /little/ difference between an external and an internal module, and as
+   such, this tutorial will discuss both kinds. When there is a difference it will be
+   explicitly pointed out, otherwise, it's safe to assume that what's said applies to
+   both internal and external modules. The example code will be an external module.
+
+** Folder Structure
+   Neorg modules are contained within a deeply nested folder structure like this:
+
+   @code
+   .
+   ├── CHANGELOG.md
+   ├── LICENSE
+   ├── README.md
+   ├── lua
+   │   └── neorg
+   │       └── modules
+   │           └── external
+   │               └── title-lister
+   │                   └── module.lua
+   @end
+
+   `neorg/modules/external` seems extraneous, right? Those folders make more sense when
+   we take a look at neorg's file structure:
+
+   @code
+   ├── lua
+   │   └── neorg
+   │       ├── core
+   │       │   └── ...
+   │       ├── modules
+   │       │   └── core
+   │       │       ├── autocommands
+   │       │       │   └── module.lua
+   @end
+
+   So we're mimicking [Neorg]'s file structure here. This allows [Neorg] to easily load
+   out module as if it were just another part of core.
+
+** The Module File
+   `module.lua` is where most if not all of your plugin code will go. You can of course
+   require code from other lua modules as normal. But typically, all of the logic for
+   a module will go into a single file. See {^ neorg-interim-ls} as an example of an
+   external module that breaks up logic into multiple sub-modules. For now, we will
+   stick to one file.
+
+*** Doc Comment
+
+    Module files conventionally start with a comment that describes the module. These
+    comments are used by neorg core's [docgen]{https://github.com/nvim-neorg/neorg/tree/main/docgen} script to generate the wiki. /Unless you
+    setup a similar CI workflow in your *external* module's repo, these comments are
+    simply comments/. *External* modules usually contain documentation in their README.
+
+    The comment is split into two parts:
+    - heading: containing titles and metadata
+    -- File, Title, and Summary are "required", other fields can be left out
+    - body: general documentation
+    -- You can use markdown here, it gets rendered
+
+    @code lua
+    --[[
+    file: My Custom Module
+    title: A Short Whitty Description of the Module
+    summary: A longer description of what this module actually does
+    internal: false
+    ---
+
+    Any extra documentation about how the module works. Normally I like to include
+    a longer, clear description of what that module is capable of.
+
+    ## Commands
+    If there are commands, I will list them here like:
+    - `:Neorg sub command` - does xyz
+
+    ## Keybinds
+    It's important to let the user know if your module makes keybinds available.
+    Again, I like to list them out:
+    - `<Plug>(neorg.my_module.do_thing)` - does a thing
+    --]]
+    @end
+
+    Configuration information is automatically generated from a different part of the
+    document, so you do not have to include that here. (Again, only for [Neorg],
+    including a config section in your README is a good idea.)
+
+*** Beginnings
+    The top of most modules includes all the stuff you require. For our example, that
+    will look like this:
+
+    @code lua
+    local neorg = require("neorg.core")
+    local modules, lib, log = neorg.modules, neorg.lib, neorg.log
+
+    local treesitter ---@type core.integrations.treesitter
+
+    local module = modules.create("external.my-module")
+    @end
+
+    Each item:
+    - `modules` - [Neorg]'s module for creating and interacting with modules
+    - `utils` - Some utility functions, we'll see a few of them later
+    - `log` - an instance of the logger, used to show messages to the user and write to
+      a file when things go wrong
+    - `treesitter`/`dirman` - These are two variables that don't do anything yet. They
+      will eventually house references to the {https://github.com/nvim-neorg/neorg/wiki/Treesitter-Integration}[Treesitter] and {https://github.com/nvim-neorg/neorg/wiki/Dirman}[Dirman] modules
+      respectively. I just want to point out how we've given them <type annotations>,
+      which will allow us to get LSP completions for their functions
+
+    And finally, our `module`. This is the table that represents our module. Typically
+    you might call this `M` if you have experience writing lua plugins. It's called
+    `module` by convention in [Neorg] modules.
+
+    If you're following along, make sure you return `module` at the end of the file!
+
+**** Naming a Module
+     There are a few naming conventions to follow.
+     - `core.` modules are reserved for modules /in/ [Neorg] core
+     - `external.` modules are for modules that exist /outside/ of [Neorg] core
+     - `.integration.` modules are for modules that integrate with another neovim
+       plugin. For example, `core.integrations.image` is the module that integrates
+       with {https://github.com/3rd/image.nvim}[3rd/image.nvim].
+
+     The name that you pass to `modules.create_module(<name>)` *must* match the
+     folder structure of your modules. Take this tutorial's module as an example:
+
+     #tangle.none
+     @code lua
+     -- this file is in `external/my-module` NOT `external/my-module`
+     local module = modules.create("external.my-module")
+     @end
+
+     If you want to nest your module in another folder, you can do that. Take a look
+     at {https://github.com/nvim-neorg/neorg/wiki/TOC}[`core.qol.toc`] as an example.
+
+*** Setup
+    We have to define a few "life cycle" methods on the module.
+
+    @code lua
+    module.setup = function()
+      -- local ok, res = pcall(require, "some_other_plugin")
+      -- if not ok then
+      --   log.error("[My Module] Failed to load `some_other_plugin` ...")
+      -- end
+
+      return {
+        -- success = ok,
+        success = true,
+        requires = { "core.integrations.treesitter", "core.dirman" },
+      }
+    end
+    @end
+    The `setup` function is often very simple, and it's main purpose is to specify
+    other modules that a function depends on.
+
+    In the commented code, you can see an example of when you might set `success` to
+    a value other than `true`.
+
+    You could add a print statement to that function and the plugin would now load
+    and print a message!
+
+*** Load
+    Next, we have the `load` method. This method is called when the function loads
+    (which is shortly after setup). This is where we assign values to our `treesitter`
+    and `dirman` variables, and also where we hook into the `:Neorg` command to add our
+    own sub commands.
+
+    @code lua
+    module.load = function()
+      treesitter = module.required["core.integrations.treesitter"]
+      dirman = module.required["core.dirman"]
+
+      -- Add a command, called like `:Neorg greet <name>`
+      modules.await("core.neorgcmd", function(neorgcmd)
+        neorgcmd.add_commands_from_table({
+          greet = { -- this is the name of the subcommand
+            name = "external.my-module.greet", -- this is the `id` of the subcommand
+            args = 1, -- this command takes 1 argument
+            condition = "norg", -- the command is only available from "norg" documents
+            complete = { -- we can provide completions for this position in the
+              -- command line. see `:h :command-completion-customlist` for more info
+              { "World" },
+            },
+          },
+          ["greet!"] = {
+            name = "external.my-module.greet!",
+            args = 1,
+            condition = "norg",
+          }
+        })
+      end)
+    end
+    @end
+
+    For more about the `:Neorg` command, see neorg command {https://github.com/nvim-neorg/neorg/blob/main/lua/neorg/modules/core/neorgcmd/module.lua#L22}[examples].
+
+*** Config
+    User facing configuration options go in `module.public.config`. For core modules,
+    [docgen] will auto generate documentation for these configuration values based on
+    the comments above each option. As usual, this documentation can contain markdown.
+    And, as usual, you should document these in the README of an external plugin.
+
+    @code lua
+    module.public.config = {
+      -- Enables this functionality, which does xyz.
+      -- This is _markdown_ and
+      --
+      -- you can leave blank lines like this.
+      enable_thing = false,
+    }
+    @end
+
+    You can access this value as the user set it with
+    `module.public.config.enable_thing` after the module's `setup` function has run.
+    So these values are accessible in {# Load}[`load`].
+
+**** Private Config
+     Sometimes, a module will need `private` config values. These values are invisible
+     to the user. A good example is the {https://github.com/nvim-neorg/neorg/blob/e6f2246a9a6509b2932c21430f245f2760a8fa3e/lua/neorg/modules/core/text-objects/module.lua#L248}[text-objects] module.
+
+     Really this is just a glorified private variables table.
+
+*** Public Methods
+    `module.public` is the table of methods that will be exposed to other modules
+    when they're required. Let's create a function that greets users!
+
+    @code lua
+    ---@class external.my-module
+    module.public = {
+      ---Greets the user
+      ---@param user_name string
+      greet_user = function(user_name)
+        vim.notify(("Hello %s!"):format(user_name), vim.log.levels.INFO)
+      end,
+    }
+    @end
+
+    Two notes:
+    ~ We create a class with `---@class external.my-module` so that we get better
+      completions, /and/ so that other modules can get completions if they require
+      our module (the same way we did {# type annotations}[up here] for `dirman`.)
+    ~ We annotated the types on our function. All functions in the public table
+      should absolutely have these doc comments:*!*
+
+*** Private Methods
+    There are two ways to handle private methods in a neorg module, there's the [Neorg]
+    way, and then there's the lua way. I tend to use a mix of both depending on -my
+    mood- what the function does.
+
+**** Neorg Way
+     You can put them in the `module.private` table. These methods are "private" but
+     can still be accessed if necessary (ie. if in makes testing significantly
+     easier).
+     @code lua
+     module.private = {
+       ---Upercase the first letter in each word, assumes words are two or more
+       -- letters long (b/c this is a neorg tutorial and I'm lazy)
+       ---@param name string
+       ---@return string
+       title_case = function(name)
+         return vim.iter(vim.split(name, " "))
+           :map(function(word)
+             return string.upper(word:sub(1, 1)) .. word:sub(2)
+           end):join(" ")
+       end
+     }
+     @end
+
+**** Lua Way
+     These functions are much easier to write and call (due to the shorter names).
+     @code lua
+     ---Convert a function into mEmEcAsE
+     ---@param name string
+     ---@return string
+     local function mEmEcAsE(name)
+       local res = ""
+       for i = 1, #name do
+         local char = name:sub(i, i):lower()
+         if i % 2 == 0 then
+           char = char:upper()
+         end
+         res = res .. char
+       end
+       return res
+     end
+     @end
+     ---
+
+    There's a healthy mix of these different flavor of private functions in the [Neorg]
+    codebase.
+
+*** Events
+    Let's put those private functions to work, by listening and responding to the
+    event that fires when a user calls our command.
+
+    @code lua
+    -- here, we subscribe to the command so that our module is notified when that
+    -- command fires
+    module.events.subscribed = {
+      ["core.neorgcmd"] = {
+        ["external.my-module.greet"] = true,
+        ["external.my-module.greet!"] = true,
+      },
+    }
+
+    local handlers = {
+      ["external.my-module.greet"] = function(name)
+        module.public.greet_user(module.private.title_case(name))
+      end,
+
+      ["external.my-module.greet!"] = function(name)
+        module.public.greet_user(mEmEcAsE(name))
+      end,
+    }
+
+    -- And now we set the event handler
+    module.on_event = function(event)
+      -- Have a look at all the information in this event!
+      -- vim.print(event)
+
+      local ev_name = event.split_type[2]
+      if handlers[ev_name] then
+        handlers[ev_name](event.content[1])
+      end
+    end
+    @end
+*** Keybinds
+    Maybe we want to let the user bind keys to one of our functions. [Neorg] relies
+    on `:h <Plug>` mappings for all of its keybinds, so we can expose a keybind to
+    say "Hello World!" like so:
+
+    #tangle.none
+    @code lua
+    vim.keymap.set("", "<Plug>(neorg.my-module.greet-world)", function()
+      module.public.greet_user("World")
+    end, { desc = "Say 'Hello World!'" })
+    @end
+
+    A user can now set their keybind like:
+
+    #tangle.none
+    @code lua
+    vim.keymap.set("n", "<localleader>Gw", "<Plug>(neorg.my-module.greet-world)")
+    @end
+
+    /Make sure you document these keybinds either in the doc comment or your project
+    README./
+
+*** Don't Forget the Return
+    @code lua
+    return module
+    @end
+
+** Neorg Standard Lib
+   Now you know the basics, let's cover some useful functions made available to a
+   [Neorg] module developer.
+
+*** Neorg Lib
+    `neorg.lib` is a group of common utilities published to luarocks as `lua-utils.nvim`.
+    I'll briefly go over some of the more interesting functions:
+
+**** Match
+     A function that aims to mimic pattern matching from other languages
+
+     #tangle.none
+     @code lua
+     local a_string = "something"
+     local result = lib.match(a_string, {
+       ["something"] = "new value",
+       [{ "some", "thing" }] = "a different value for these two",
+       _ = "default value",
+     })
+     @end
+
+**** Number Wrap
+     Instead of `((n + 1) % max - 1)` which is annoying to remember and unclear, you
+     can use `lib.number_wrap(n, 0, max)`.
+
+**** Title
+     Oh hey, we didn't actually have to write that title_case function. `lib.title`
+     does the same thing!
+
+**** Inline Pcall
+     `lib.inline_pcall` is like pcall, but it returns a single value or nil. This can
+     be useful in ternaries.
+
+     ---
+
+    There are others, but these are the most useful to me.
+
+*** Internal Modules
+    coming soon... ,to a tutorial near you,
+
+* Footnotes
+
+  ^ 1
+  See `:h conceallevel` and `:h concealcursor`
+
+  ^ neorg-interim-ls
+  {https://github.com/benlubas/neorg-interim-ls} currently contains three separate
+  modules as part of one plugin! Only one of these modules is user facing. That is,
+  only the `external.interim-ls` module will be loaded and configured by the user, and
+  the other two modules are loaded some other way (either as a dependency or manually
+  loaded based on the user's configuration).
