@@ -60,7 +60,7 @@ version: 1.1.1
    @end
 
    So we're mimicking [Neorg]'s file structure here. This allows [Neorg] to easily load
-   out module as if it were just another part of core.
+   our module as if it were just another part of core.
 
 ** The Module File
    `module.lua` is where most if not all of your plugin code will go. You can of course
@@ -123,7 +123,7 @@ version: 1.1.1
 
     Each item:
     - `modules` - [Neorg]'s module for creating and interacting with modules
-    - `utils` - Some utility functions, we'll see a few of them later
+    - `lib` - Some utility functions, we'll see a few of them later
     - `log` - an instance of the logger, used to show messages to the user and write to
       a file when things go wrong
     - `treesitter`/`dirman` - These are two variables that don't do anything yet. They

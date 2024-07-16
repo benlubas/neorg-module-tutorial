@@ -19,7 +19,7 @@ Again, I like to list them out:
 --]]
 
 local neorg = require("neorg.core")
-local modules, utils, log = neorg.modules, neorg.utils, neorg.log
+local modules, lib, log = neorg.modules, neorg.lib, neorg.log
 
 local treesitter ---@type core.integrations.treesitter
 
