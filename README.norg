@@ -8,7 +8,7 @@ tangle: {
 }
 authors: benlubas
 created: 2024-07-15T14:29:10-0500
-updated: 2024-07-15T22:20:31-0500
+updated: 2024-07-17T11:17:50-0500
 version: 1.1.1
 @end
 
@@ -225,7 +225,7 @@ version: 1.1.1
     And, as usual, you should document these in the README of an external plugin.
 
     @code lua
-    module.public.config = {
+    module.config.public = {
       -- Enables this functionality, which does xyz.
       -- This is _markdown_ and
       --
@@ -235,12 +235,15 @@ version: 1.1.1
     @end
 
     You can access this value as the user set it with
-    `module.public.config.enable_thing` after the module's `setup` function has run.
-    So these values are accessible in {# Load}[`load`].
+    `module.config.public.enable_thing` /after/ the module's `setup` function has run.
+    So these values /are/ accessible in {# Load}[`load`].
 
 **** Private Config
-     Sometimes, a module will need `private` config values. These values are invisible
-     to the user. A good example is the {https://github.com/nvim-neorg/neorg/blob/e6f2246a9a6509b2932c21430f245f2760a8fa3e/lua/neorg/modules/core/text-objects/module.lua#L248}[text-objects] module.
+     Sometimes, a module will need `private` config values for which they can use the
+     `module.config.private` table.
+
+     - These values are invisible to the user
+     - A good example is the {https://github.com/nvim-neorg/neorg/blob/e6f2246a9a6509b2932c21430f245f2760a8fa3e/lua/neorg/modules/core/text-objects/module.lua#L248}[text-objects] module
 
      Really this is just a glorified private variables table.
 

@@ -63,7 +63,7 @@ module.load = function()
   end)
 end
 
-module.public.config = {
+module.config.public = {
   -- Enables this functionality, which does xyz.
   -- This is _markdown_ and
   --
